@@ -141,7 +141,14 @@ const fetchAndListRemoteBranches = () => {
 };
 
 const runInit = async (branches) => {
-  const names = branches.map((b) => b.name);
+  const names = branches
+    .map((b) => b.name)
+    .sort((a, b) => {
+      const aSlash = a.includes("/");
+      const bSlash = b.includes("/");
+      if (aSlash !== bSlash) return aSlash ? 1 : -1;
+      return a.localeCompare(b);
+    });
   const preferred =
     names.find((n) => n === "develop") ??
     names.find((n) => n === "development") ??
