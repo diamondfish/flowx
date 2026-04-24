@@ -135,5 +135,5 @@ export const branchCheckbox = createPrompt((config, done) => {
   const header = `${C.dim}      ${headerCols.join("  ")}${C.reset}`;
   const lines = items.map(renderItem).join("\n");
   const help = `${C.dim}  (↑/↓ navigate, space/→ toggle, enter delete)${C.reset}`;
-  return [`${prefix} ${message}`, "", header, lines, help].join("\n");
+  return [`${prefix} ${message}`, "", header, lines, "", help].join("\n");
 });
