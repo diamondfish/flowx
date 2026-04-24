@@ -5,6 +5,7 @@ export const CONFIG_FILENAME = ".flowxrc";
 
 const DEFAULTS = {
   remote: "origin",
+  base: null,
   protected: [
     "master",
     "main",
@@ -16,20 +17,31 @@ const DEFAULTS = {
   ],
 };
 
-export const CONFIG_TEMPLATE = `{
+export const buildConfigContent = ({ base } = {}) => {
+  const baseLine = base ? `  "base": "${base}",` : `  "base": null,`;
+  const protectedBlock = [
+    `  // "protected": [`,
+    ...DEFAULTS.protected.map((b) => `  //   "${b}",`),
+    `  // ]`,
+  ].join("\n");
+
+  return `{
   // Remote to operate on
   "remote": "${DEFAULTS.remote}",
 
-  // Branches that cannot be deleted — replaces the built-in default list
-  "protected": [
-${DEFAULTS.protected.map((b) => `    "${b}"`).join(",\n")}
-  ]
+  // Branch used as the base for the "Ahead" column.
+  // Set to null to hide the Ahead column.
+${baseLine}
+
+  // Branches that cannot be deleted — uncomment and edit to override defaults.
+${protectedBlock}
 }
 `;
-
-export const writeConfigTemplate = (targetPath) => {
-  writeFileSync(targetPath, CONFIG_TEMPLATE, "utf8");
 };
+
+export const CONFIG_TEMPLATE = buildConfigContent();
+
+const stripTrailingCommas = (source) => source.replace(/,(\s*[\]}])/g, "$1");
 
 const stripComments = (source) => {
   let out = "";
@@ -74,6 +86,11 @@ const stripComments = (source) => {
   return out;
 };
 
+export const configExists = (configPath) => {
+  const path = configPath ?? join(process.cwd(), CONFIG_FILENAME);
+  return existsSync(path);
+};
+
 export const loadConfig = (configPath) => {
   const explicit = configPath != null;
   const path = explicit ? configPath : join(process.cwd(), CONFIG_FILENAME);
@@ -87,7 +104,7 @@ export const loadConfig = (configPath) => {
 
   let parsed;
   try {
-    parsed = JSON.parse(stripComments(raw));
+    parsed = JSON.parse(stripTrailingCommas(stripComments(raw)));
   } catch (err) {
     throw new Error(`Failed to parse ${path}: ${err.message}`);
   }
@@ -96,8 +113,15 @@ export const loadConfig = (configPath) => {
   if (typeof parsed.remote === "string" && parsed.remote.trim()) {
     config.remote = parsed.remote.trim();
   }
+  if (typeof parsed.base === "string" && parsed.base.trim()) {
+    config.base = parsed.base.trim();
+  }
   if (Array.isArray(parsed.protected)) {
     config.protected = parsed.protected.filter((b) => typeof b === "string");
   }
   return config;
+};
+
+export const writeConfigTemplate = (targetPath) => {
+  writeFileSync(targetPath, CONFIG_TEMPLATE, "utf8");
 };

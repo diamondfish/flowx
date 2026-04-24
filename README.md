@@ -41,10 +41,15 @@ flowx --dry-run
 
 flowx can be configured with a `.flowxrc` file written in JSON with support for `//` line and `/* */` block comments. By default it is read from the current working directory — if it doesn't exist, built-in defaults are used.
 
+The first time you run `flowx` in a git repo without a `.flowxrc`, it prompts you to pick a base branch and writes the config for you (cursor defaults to `develop`/`development` if either exists). Pick `— no base` to skip.
+
 Supported keys:
 
 - `remote` (string) — name of the git remote to operate on. Defaults to `"origin"`.
-- `protected` (string[]) — list of branch names that cannot be deleted. **Replaces** the built-in default list.
+- `base` (string or null) — branch used as the base for the `Ahead` column (e.g. `"develop"`). When set, the `Ahead` column is shown and counts commits on each branch that are not on `base`. Set to `null` to hide the column entirely.
+- `protected` (string[]) — list of branch names or glob patterns that cannot be deleted. Entries containing `*` are matched as globs (e.g. `"hotfix/*"` matches `hotfix/anything`), entries without `*` must match exactly. **Replaces** the built-in default list when present. The `base` branch is always protected automatically.
+
+The config format supports `//` line comments, `/* */` block comments, and trailing commas.
 
 ### Example `.flowxrc`
 
@@ -53,7 +58,10 @@ Supported keys:
   // Operate on a different remote than origin
   "remote": "github",
 
-  /* Only these are treated as protected */
+  // Count "Ahead" commits relative to develop instead of main
+  "base": "develop",
+
+  // Only these are treated as protected
   "protected": ["main", "develop"]
 }
 ```

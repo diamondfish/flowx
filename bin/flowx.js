@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { execSync } from "node:child_process";
-import { confirm } from "@inquirer/prompts";
+import { confirm, select } from "@inquirer/prompts";
 import {
   createPrompt,
   useState,
@@ -12,11 +12,13 @@ import {
   isDownKey,
   makeTheme,
 } from "@inquirer/core";
-import { existsSync } from "node:fs";
+import { existsSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 import {
   loadConfig,
   writeConfigTemplate,
+  buildConfigContent,
+  configExists,
   CONFIG_FILENAME,
 } from "../src/config.js";
 
@@ -40,17 +42,42 @@ const WRITE_CONFIG_PATH =
   getFlagValue("--write-config") ?? getFlagValue("-w");
 const DRY_RUN = process.argv.includes("--dry-run");
 
+const buildProtectedMatcher = (patterns) => {
+  const exact = new Set();
+  const regexes = [];
+  for (const p of patterns) {
+    if (typeof p !== "string" || !p) continue;
+    if (p.includes("*")) {
+      const escape = (s) => s.replace(/[.+?^${}()|[\]\\]/g, "\\$&");
+      const source = "^" + p.split("*").map(escape).join(".*") + "$";
+      regexes.push(new RegExp(source));
+    } else {
+      exact.add(p);
+    }
+  }
+  return {
+    has: (name) => exact.has(name) || regexes.some((re) => re.test(name)),
+    add: (name) => exact.add(name),
+    delete: (name) => exact.delete(name),
+  };
+};
+
 let REMOTE = "origin";
-let PROTECTED = new Set();
+let PROTECTED = buildProtectedMatcher([]);
+let BASE = null;
+let CONFIG_EXISTS = false;
 if (!WRITE_CONFIG_MODE) {
   try {
     const config = loadConfig(CONFIG_PATH);
     REMOTE = config.remote;
-    PROTECTED = new Set(config.protected);
+    PROTECTED = buildProtectedMatcher(config.protected);
+    BASE = config.base;
   } catch (err) {
     console.error(`\x1b[31m${err.message}\x1b[0m`);
     process.exit(1);
   }
+  CONFIG_EXISTS = configExists(CONFIG_PATH);
+  if (BASE) PROTECTED.add(BASE);
 }
 
 const C = {
@@ -113,25 +140,36 @@ const fetchAndListRemoteBranches = () => {
     .sort((a, b) => a.name.localeCompare(b.name));
 };
 
-const getDefaultRemoteBranch = () => {
-  try {
-    const ref = git(`symbolic-ref --short refs/remotes/${REMOTE}/HEAD`);
-    const prefix = `${REMOTE}/`;
-    if (ref.startsWith(prefix)) return ref.slice(prefix.length);
-  } catch {
-    // not set — fall back to candidate detection
-  }
-  for (const candidate of ["main", "master"]) {
-    try {
-      execSync(`git rev-parse --verify refs/remotes/${REMOTE}/${candidate}`, {
-        stdio: "pipe",
-      });
-      return candidate;
-    } catch {
-      // try next
-    }
-  }
-  return null;
+const runInit = async (branches) => {
+  const names = branches.map((b) => b.name);
+  const preferred =
+    names.find((n) => n === "develop") ??
+    names.find((n) => n === "development") ??
+    names[0];
+
+  console.log("");
+  console.log(
+    `${C.cyan}No ${CONFIG_FILENAME} found — let's configure flowx for this repo.${C.reset}`,
+  );
+  console.log(
+    `${C.dim}Pick the branch that others typically fork from. Used for the "Ahead" column.${C.reset}`,
+  );
+  console.log("");
+
+  const picked = await select({
+    message: "Base branch:",
+    default: preferred,
+    choices: [
+      ...names.map((n) => ({ name: n, value: n })),
+      { name: "— no base (hide Ahead column)", value: null },
+    ],
+  });
+
+  const targetPath = resolve(CONFIG_FILENAME);
+  writeFileSync(targetPath, buildConfigContent({ base: picked }), "utf8");
+  console.log(`${C.green}Wrote${C.reset} ${targetPath}\n`);
+
+  return picked;
 };
 
 const getCommitCount = (branch) => {
@@ -250,8 +288,12 @@ const branchCheckbox = createPrompt((config, done) => {
     const padded = displayName(item).padEnd(maxDisplayLen);
     const name = item.disabled ? `${C.dim}${padded}${C.reset}` : padded;
     const commits = item.commits == null ? "?" : String(item.commits);
-    const ahead = item.ahead == null ? "—" : String(item.ahead);
-    const meta = `${C.dim}${item.date}  ${commits.padEnd(7)}  ${ahead.padEnd(5)}${C.reset}`;
+    const metaParts = [item.date, commits.padEnd(7)];
+    if (BASE) {
+      const ahead = item.ahead == null ? "—" : String(item.ahead);
+      metaParts.push(ahead.padEnd(5));
+    }
+    const meta = `${C.dim}${metaParts.join("  ")}${C.reset}`;
     return `${pointer} ${box} ${name}  ${meta}`;
   };
 
@@ -260,7 +302,13 @@ const branchCheckbox = createPrompt((config, done) => {
     return `${prefix} ${message} ${C.dim}(${count} selected)${C.reset}`;
   }
 
-  const header = `${C.dim}      ${"Branch".padEnd(maxDisplayLen)}  ${"Updated".padEnd(10)}  ${"Commits".padEnd(7)}  ${"Ahead".padEnd(5)}${C.reset}`;
+  const headerCols = [
+    "Branch".padEnd(maxDisplayLen),
+    "Updated".padEnd(10),
+    "Commits".padEnd(7),
+  ];
+  if (BASE) headerCols.push("Ahead".padEnd(5));
+  const header = `${C.dim}      ${headerCols.join("  ")}${C.reset}`;
   const lines = items.map(renderItem).join("\n");
   const help = `${C.dim}  (↑/↓ navigate, space/→ toggle, enter delete)${C.reset}`;
   return [`${prefix} ${message}`, header, lines, help].join("\n");
@@ -325,16 +373,26 @@ const main = async () => {
     process.exit(0);
   }
 
-  const base = getDefaultRemoteBranch();
-  if (base) PROTECTED.add(base);
+  if (BASE && !branches.some((b) => b.name === BASE)) {
+    console.log(
+      `${C.yellow}⚠ Configured base "${BASE}" not found on ${REMOTE} — hiding Ahead column.${C.reset}`,
+    );
+    PROTECTED.delete(BASE);
+    BASE = null;
+  }
 
-  const label = base
-    ? `Counting commits (total and ahead of ${base})...`
+  if (!CONFIG_EXISTS) {
+    BASE = await runInit(branches);
+    if (BASE) PROTECTED.add(BASE);
+  }
+
+  const label = BASE
+    ? `Counting commits (total and ahead of ${BASE})...`
     : "Counting commits...";
   process.stdout.write(`${C.cyan}${label}${C.reset}`);
   for (const b of branches) {
     b.commits = getCommitCount(b.name);
-    b.ahead = getCommitsAhead(b.name, base);
+    if (BASE) b.ahead = getCommitsAhead(b.name, BASE);
   }
   process.stdout.write(` ${C.green}done${C.reset}\n`);
 
@@ -345,8 +403,8 @@ const main = async () => {
   if (deletableCount === 0) {
     const rows = branches.map((b) => {
       const reason =
-        b.name === base
-          ? "default"
+        b.name === BASE
+          ? "base"
           : b.name === currentBranch
             ? "current HEAD"
             : "protected";
@@ -356,17 +414,23 @@ const main = async () => {
       (m, r) => Math.max(m, r.display.length),
       0,
     );
+    const headerCols = [
+      "Branch".padEnd(maxDisplayLen),
+      "Updated".padEnd(10),
+      "Commits".padEnd(7),
+    ];
+    if (BASE) headerCols.push("Ahead".padEnd(5));
     console.log("");
-    console.log(
-      `${C.dim}      ${"Branch".padEnd(maxDisplayLen)}  ${"Updated".padEnd(10)}  ${"Commits".padEnd(7)}  ${"Ahead".padEnd(5)}${C.reset}`,
-    );
+    console.log(`${C.dim}      ${headerCols.join("  ")}${C.reset}`);
     for (const r of rows) {
       const padded = r.display.padEnd(maxDisplayLen);
       const commits = r.commits == null ? "?" : String(r.commits);
-      const ahead = r.ahead == null ? "—" : String(r.ahead);
-      console.log(
-        `  ${C.dim}[-] ${padded}  ${r.date}  ${commits.padEnd(7)}  ${ahead.padEnd(5)}${C.reset}`,
-      );
+      const parts = [padded, r.date, commits.padEnd(7)];
+      if (BASE) {
+        const ahead = r.ahead == null ? "—" : String(r.ahead);
+        parts.push(ahead.padEnd(5));
+      }
+      console.log(`  ${C.dim}[-] ${parts.join("  ")}${C.reset}`);
     }
     console.log("");
     console.log(
@@ -384,8 +448,8 @@ const main = async () => {
   const choices = branches.map((b) => {
     const disabled = isProtected(b.name, currentBranch);
     const reason =
-      b.name === base
-        ? "default"
+      b.name === BASE
+        ? "base"
         : b.name === currentBranch
           ? "current HEAD"
           : PROTECTED.has(b.name)
@@ -396,6 +460,7 @@ const main = async () => {
       value: b.name,
       date: b.date,
       commits: b.commits,
+      ahead: b.ahead,
       disabled: disabled ? reason : false,
     };
   });
