@@ -1,6 +1,6 @@
 #!/usr/bin/env node
-import { execSync } from 'node:child_process';
-import { confirm } from '@inquirer/prompts';
+import { execSync } from "node:child_process";
+import { confirm } from "@inquirer/prompts";
 import {
   createPrompt,
   useState,
@@ -11,35 +11,63 @@ import {
   isUpKey,
   isDownKey,
   makeTheme,
-} from '@inquirer/core';
+} from "@inquirer/core";
+import { existsSync } from "node:fs";
+import { resolve } from "node:path";
+import {
+  loadConfig,
+  writeConfigTemplate,
+  CONFIG_FILENAME,
+} from "./config.js";
 
-const PROTECTED = new Set([
-  'master',
-  'main',
-  'develop',
-  'production',
-  'staging',
-  'prod',
-]);
+const hasFlag = (flag) =>
+  process.argv.some((a) => a === flag || a.startsWith(`${flag}=`));
 
-const REMOTE = 'origin';
-const DRY_RUN = process.argv.includes('--dry-run');
-
-const C = {
-  reset: '\x1b[0m',
-  dim: '\x1b[90m',
-  red: '\x1b[31m',
-  green: '\x1b[32m',
-  yellow: '\x1b[33m',
-  cyan: '\x1b[36m',
-  bold: '\x1b[1m',
+const getFlagValue = (flag) => {
+  const idx = process.argv.indexOf(flag);
+  if (idx !== -1) {
+    const next = process.argv[idx + 1];
+    if (next && !next.startsWith("-")) return next;
+  }
+  const eq = process.argv.find((a) => a.startsWith(`${flag}=`));
+  if (eq) return eq.slice(flag.length + 1);
+  return null;
 };
 
-const git = (args) => execSync(`git ${args}`, { encoding: 'utf8' }).trim();
+const CONFIG_PATH = getFlagValue("--config") ?? getFlagValue("-c");
+const WRITE_CONFIG_MODE = hasFlag("--write-config") || hasFlag("-w");
+const WRITE_CONFIG_PATH =
+  getFlagValue("--write-config") ?? getFlagValue("-w");
+const DRY_RUN = process.argv.includes("--dry-run");
+
+let REMOTE = "origin";
+let PROTECTED = new Set();
+if (!WRITE_CONFIG_MODE) {
+  try {
+    const config = loadConfig(CONFIG_PATH);
+    REMOTE = config.remote;
+    PROTECTED = new Set(config.protected);
+  } catch (err) {
+    console.error(`\x1b[31m${err.message}\x1b[0m`);
+    process.exit(1);
+  }
+}
+
+const C = {
+  reset: "\x1b[0m",
+  dim: "\x1b[90m",
+  red: "\x1b[31m",
+  green: "\x1b[32m",
+  yellow: "\x1b[33m",
+  cyan: "\x1b[36m",
+  bold: "\x1b[1m",
+};
+
+const git = (args) => execSync(`git ${args}`, { encoding: "utf8" }).trim();
 
 const isInsideGitRepo = () => {
   try {
-    execSync('git rev-parse --is-inside-work-tree', { stdio: 'pipe' });
+    execSync("git rev-parse --is-inside-work-tree", { stdio: "pipe" });
     return true;
   } catch {
     return false;
@@ -48,7 +76,7 @@ const isInsideGitRepo = () => {
 
 const hasRemote = (name) => {
   try {
-    execSync(`git remote get-url ${name}`, { stdio: 'pipe' });
+    execSync(`git remote get-url ${name}`, { stdio: "pipe" });
     return true;
   } catch {
     return false;
@@ -57,7 +85,7 @@ const hasRemote = (name) => {
 
 const getCurrentBranch = () => {
   try {
-    return git('rev-parse --abbrev-ref HEAD');
+    return git("rev-parse --abbrev-ref HEAD");
   } catch {
     return null;
   }
@@ -65,24 +93,38 @@ const getCurrentBranch = () => {
 
 const fetchAndListRemoteBranches = () => {
   console.log(`${C.cyan}Fetching from ${REMOTE}...${C.reset}`);
-  execSync(`git fetch --prune ${REMOTE}`, { stdio: 'inherit' });
-  const raw = git(`for-each-ref --format=%(refname) refs/remotes/${REMOTE}`);
+  execSync(`git fetch --prune ${REMOTE}`, { stdio: "inherit" });
+  const raw = git(
+    `for-each-ref --format=%(refname)%09%(committerdate:short) refs/remotes/${REMOTE}`,
+  );
   const prefix = `refs/remotes/${REMOTE}/`;
   return raw
     .split(/\r?\n/)
     .map((s) => s.trim())
     .filter(Boolean)
-    .filter((s) => s.startsWith(prefix))
-    .map((s) => s.slice(prefix.length))
-    .filter((b) => b !== 'HEAD')
-    .sort();
+    .map((line) => {
+      const [refname, date] = line.split("\t");
+      return { refname, date };
+    })
+    .filter((r) => r.refname.startsWith(prefix))
+    .map((r) => ({ name: r.refname.slice(prefix.length), date: r.date }))
+    .filter((b) => b.name !== "HEAD")
+    .sort((a, b) => a.name.localeCompare(b.name));
+};
+
+const getCommitCount = (branch) => {
+  try {
+    return Number(git(`rev-list --count refs/remotes/${REMOTE}/${branch}`));
+  } catch {
+    return null;
+  }
 };
 
 const isProtected = (branch, currentBranch) =>
   PROTECTED.has(branch) || branch === currentBranch;
 
-const DELETE_ROW = Symbol('delete-row');
-const isRightKey = (key) => key && key.name === 'right';
+const DELETE_ROW = Symbol("delete-row");
+const isRightKey = (key) => key && key.name === "right";
 
 const branchCheckbox = createPrompt((config, done) => {
   const { message, choices } = config;
@@ -90,8 +132,10 @@ const branchCheckbox = createPrompt((config, done) => {
   const prefix = usePrefix({ theme });
 
   const items = [...choices, DELETE_ROW];
+  const maxNameLen = choices.reduce((m, c) => Math.max(m, c.name.length), 0);
   const firstSelectable = choices.findIndex((c) => !c.disabled);
-  const initialCursor = firstSelectable >= 0 ? firstSelectable : items.length - 1;
+  const initialCursor =
+    firstSelectable >= 0 ? firstSelectable : items.length - 1;
 
   const [cursor, setCursor] = useState(initialCursor);
   const [selected, setSelected] = useState(new Set());
@@ -142,13 +186,13 @@ const branchCheckbox = createPrompt((config, done) => {
 
   const renderItem = (item, idx) => {
     const isCursor = idx === cursor;
-    const pointer = isCursor ? `${C.cyan}❯${C.reset}` : ' ';
+    const pointer = isCursor ? `${C.cyan}❯${C.reset}` : " ";
 
     if (item === DELETE_ROW) {
       const count = selected.size;
-      const label = `Delete ${count} marked branch${count === 1 ? '' : 'es'}`;
+      const label = `Delete ${count} marked branch${count === 1 ? "" : "es"}`;
       const color = count > 0 ? C.red : C.dim;
-      const bold = isCursor ? C.bold : '';
+      const bold = isCursor ? C.bold : "";
       return `${pointer} ${bold}${color}▶ ${label}${C.reset}`;
     }
 
@@ -157,12 +201,15 @@ const branchCheckbox = createPrompt((config, done) => {
       ? `${C.dim}[-]${C.reset}`
       : isSelected
         ? `${C.green}[x]${C.reset}`
-        : '[ ]';
-    const name = item.disabled ? `${C.dim}${item.name}${C.reset}` : item.name;
+        : "[ ]";
+    const padded = item.name.padEnd(maxNameLen);
+    const name = item.disabled ? `${C.dim}${padded}${C.reset}` : padded;
+    const commits = item.commits == null ? "?" : String(item.commits);
+    const meta = `${C.dim}${item.date}  ${commits.padStart(5)} commits${C.reset}`;
     const tag = item.disabled
-      ? ` ${C.dim}(${typeof item.disabled === 'string' ? item.disabled : 'protected'})${C.reset}`
-      : '';
-    return `${pointer} ${box} ${name}${tag}`;
+      ? ` ${C.dim}(${typeof item.disabled === "string" ? item.disabled : "protected"})${C.reset}`
+      : "";
+    return `${pointer} ${box} ${name}  ${meta}${tag}`;
   };
 
   if (submitted) {
@@ -170,25 +217,48 @@ const branchCheckbox = createPrompt((config, done) => {
     return `${prefix} ${message} ${C.dim}(${count} selected)${C.reset}`;
   }
 
-  const lines = items.map(renderItem).join('\n');
+  const lines = items.map(renderItem).join("\n");
   const help = `${C.dim}  (↑/↓ navigate, space/→ toggle, enter delete)${C.reset}`;
-  return [`${prefix} ${message}`, lines, help].join('\n');
+  return [`${prefix} ${message}`, lines, help].join("\n");
 });
 
 const deleteBranch = (branch) => {
   if (DRY_RUN) {
-    console.log(`${C.yellow}[dry-run]${C.reset} would delete ${C.bold}${branch}${C.reset}`);
+    console.log(
+      `${C.yellow}[dry-run]${C.reset} would delete ${C.bold}${branch}${C.reset}`,
+    );
     return { ok: true };
   }
   try {
-    execSync(`git push ${REMOTE} --delete ${branch}`, { stdio: 'pipe' });
+    execSync(`git push ${REMOTE} --delete ${branch}`, { stdio: "pipe" });
     return { ok: true };
   } catch (err) {
     return { ok: false, error: err.stderr?.toString() || err.message };
   }
 };
 
+const runWriteConfig = async (targetPath) => {
+  const path = resolve(targetPath ?? CONFIG_FILENAME);
+  if (existsSync(path)) {
+    const overwrite = await confirm({
+      message: `${path} already exists. Overwrite?`,
+      default: false,
+    });
+    if (!overwrite) {
+      console.log(`${C.dim}Aborted. File was not changed.${C.reset}`);
+      return;
+    }
+  }
+  writeConfigTemplate(path);
+  console.log(`${C.green}Wrote${C.reset} ${path}`);
+};
+
 const main = async () => {
+  if (WRITE_CONFIG_MODE) {
+    await runWriteConfig(WRITE_CONFIG_PATH);
+    return;
+  }
+
   if (!isInsideGitRepo()) {
     console.error(
       `${C.red}Not a git repository.${C.reset} ${C.dim}Run flowx from inside a git repo.${C.reset}`,
@@ -211,11 +281,30 @@ const main = async () => {
     process.exit(0);
   }
 
+  process.stdout.write(`${C.cyan}Counting commits...${C.reset}`);
+  for (const b of branches) b.commits = getCommitCount(b.name);
+  process.stdout.write(` ${C.green}done${C.reset}\n`);
+
   const deletableCount = branches.filter(
-    (b) => !isProtected(b, currentBranch),
+    (b) => !isProtected(b.name, currentBranch),
   ).length;
 
   if (deletableCount === 0) {
+    const maxNameLen = branches.reduce((m, b) => Math.max(m, b.name.length), 0);
+    console.log("");
+    for (const b of branches) {
+      const padded = b.name.padEnd(maxNameLen);
+      const commits = b.commits == null ? "?" : String(b.commits);
+      const reason = PROTECTED.has(b.name)
+        ? "protected"
+        : b.name === currentBranch
+          ? "current HEAD"
+          : "protected";
+      console.log(
+        `  ${C.dim}[-] ${padded}  ${b.date}  ${commits.padStart(5)} commits  (${reason})${C.reset}`,
+      );
+    }
+    console.log("");
     console.log(
       `${C.yellow}Only protected branches exist on ${REMOTE}. Nothing to delete.${C.reset}`,
     );
@@ -223,19 +312,23 @@ const main = async () => {
   }
 
   if (DRY_RUN) {
-    console.log(`${C.yellow}${C.bold}[DRY-RUN MODE]${C.reset} ${C.yellow}no branches will actually be deleted${C.reset}\n`);
+    console.log(
+      `${C.yellow}${C.bold}[DRY-RUN MODE]${C.reset} ${C.yellow}no branches will actually be deleted${C.reset}\n`,
+    );
   }
 
   const choices = branches.map((b) => {
-    const disabled = isProtected(b, currentBranch);
-    const reason = PROTECTED.has(b)
-      ? 'protected'
-      : b === currentBranch
-        ? 'current HEAD'
+    const disabled = isProtected(b.name, currentBranch);
+    const reason = PROTECTED.has(b.name)
+      ? "protected"
+      : b.name === currentBranch
+        ? "current HEAD"
         : false;
     return {
-      name: b,
-      value: b,
+      name: b.name,
+      value: b.name,
+      date: b.date,
+      commits: b.commits,
       disabled: disabled ? reason : false,
     };
   });
@@ -252,10 +345,10 @@ const main = async () => {
 
   console.log(`\n${C.bold}Branches to delete:${C.reset}`);
   for (const b of selected) console.log(`  - ${b}`);
-  console.log('');
+  console.log("");
 
   const ok = await confirm({
-    message: `Delete ${selected.length} branch${selected.length === 1 ? '' : 'es'} from ${REMOTE}? This cannot be undone.`,
+    message: `Delete ${selected.length} branch${selected.length === 1 ? "" : "es"} from ${REMOTE}? This cannot be undone.`,
     default: false,
   });
 
@@ -264,7 +357,7 @@ const main = async () => {
     process.exit(0);
   }
 
-  console.log('');
+  console.log("");
   const results = [];
   for (const branch of selected) {
     process.stdout.write(`Deleting ${branch}... `);
@@ -273,22 +366,24 @@ const main = async () => {
       console.log(`${C.green}✔${C.reset}`);
     } else {
       console.log(`${C.red}✖${C.reset}`);
-      console.log(`  ${C.red}${result.error.trim().split('\n').join('\n  ')}${C.reset}`);
+      console.log(
+        `  ${C.red}${result.error.trim().split("\n").join("\n  ")}${C.reset}`,
+      );
     }
     results.push({ branch, ...result });
   }
 
   const failures = results.filter((r) => !r.ok);
-  console.log('');
+  console.log("");
   console.log(
     `${C.bold}Done.${C.reset} ${C.green}${results.length - failures.length} deleted${C.reset}` +
-      (failures.length ? `, ${C.red}${failures.length} failed${C.reset}` : ''),
+      (failures.length ? `, ${C.red}${failures.length} failed${C.reset}` : ""),
   );
   process.exit(failures.length ? 1 : 0);
 };
 
 main().catch((err) => {
-  if (err && err.name === 'ExitPromptError') {
+  if (err && err.name === "ExitPromptError") {
     console.log(`\n${C.dim}Cancelled.${C.reset}`);
     process.exit(0);
   }
