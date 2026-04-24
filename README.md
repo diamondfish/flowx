@@ -30,18 +30,19 @@ flowx --dry-run
 
 ### List format
 
-Each row in the interactive list shows the branch name, the date of its last commit, and the total number of commits on it. When a `base` branch is configured, an `Ahead` column is added, showing how many commits that branch has that are not on `base`.
+Each row in the interactive list shows the branch name, the date of its last commit (with a relative "X days ago" hint), and the total number of commits on it. When a `base` branch is configured, an `Ahead` column is added, showing how many commits that branch has that are not on `base`.
 
 ```
 ? Select branches to delete from origin:
 
-        Branch                       Updated     Commits  Ahead
-  ❯ [ ] feature/new-thing            2024-11-20  8435     3
-    [ ] feature/stale                2024-05-02  8444     12
-    [-] develop (base)               2025-04-22  8479     0
-    [-] main (protected)             2025-04-24  8432     —
-    [-] feature/mine (current HEAD)  2024-12-01  8440     8
-    ▶ Delete 0 marked branches
+        Branch                       Updated                     Commits  Ahead
+    [-] develop (base)               2025-04-22 (2 hours ago)    8479     1
+    [-] feature/mine (current HEAD)  2024-12-01 (3 weeks ago)    8440     8
+  ❯ [ ] feature/new-thing            2024-11-20 (2 days ago)     8435     3
+    [ ] feature/stale                2024-05-02 (6 months ago)   8444     12
+    [-] main (default)               2025-04-24 (4 minutes ago)  8432     0
+    [-] staging (protected)          2025-03-24 (1 month ago)    8455     3
+    ▶ Delete 0 selected branches
   (↑/↓ navigate, space/→ toggle, enter delete)
 ```
 
@@ -120,7 +121,7 @@ If the target file already exists you will be prompted before it is overwritten.
 1. Verifies you are inside a git repository and that the configured remote exists.
 2. Runs `git fetch --prune <remote>`.
 3. If no `.flowx.jsonc` is found, runs the init prompt to pick a base branch and writes the file.
-4. Lists remote branches under `refs/remotes/<remote>/` with last-commit date, total commit count, and — when `base` is set — commits ahead of `base`.
+4. Lists remote branches under `refs/remotes/<remote>/` with last-commit date (including a relative "X days ago" hint), total commit count, and — when `base` is set — commits ahead of `base`.
 5. After confirmation, deletes each selected branch with `git push <remote> --delete <branch>`.
 
 ## Develop

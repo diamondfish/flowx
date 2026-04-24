@@ -94,7 +94,7 @@ export const branchCheckbox = createPrompt((config, done) => {
 
     if (item === DELETE_ROW) {
       const count = selected.size;
-      const label = `Delete ${count} marked branch${count === 1 ? "" : "es"}`;
+      const label = `Delete ${count} selected branch${count === 1 ? "" : "es"}`;
       const color = count > 0 ? C.red : C.dim;
       const bold = isCursor ? C.bold : "";
       return `${pointer} ${bold}${color}▶ ${label}${C.reset}`;
@@ -109,7 +109,10 @@ export const branchCheckbox = createPrompt((config, done) => {
     const padded = displayName(item).padEnd(maxDisplayLen);
     const name = item.disabled ? `${C.dim}${padded}${C.reset}` : padded;
     const commits = item.commits == null ? "?" : String(item.commits);
-    const metaParts = [updatedCol(item).padEnd(maxUpdatedLen), commits.padEnd(7)];
+    const metaParts = [
+      updatedCol(item).padEnd(maxUpdatedLen),
+      commits.padEnd(7),
+    ];
     if (showAhead) {
       const ahead = item.ahead == null ? "—" : String(item.ahead);
       metaParts.push(ahead.padEnd(5));
