@@ -33,7 +33,7 @@ flowx --dry-run
 Each row in the interactive list shows the branch name, the date of its last commit (with a relative "X days ago" hint), and the total number of commits on it. When a `base` branch is configured, an `Ahead` column is added, showing how many commits that branch has that are not on `base`.
 
 ```
-? Select branches to delete from origin:
+? Select branches to delete from origin
 
         Branch                       Updated                     Commits  Ahead
     [-] develop (base)               2025-04-22 (2 hours ago)    8479     1
@@ -43,6 +43,7 @@ Each row in the interactive list shows the branch name, the date of its last com
     [-] main (default)               2025-04-24 (4 minutes ago)  8432     0
     [-] staging (protected)          2025-03-24 (1 month ago)    8455     3
     ▶ Delete 0 selected branches
+  
   (↑/↓ navigate, SPACE/→ toggle, ENTER delete)
 ```
 
