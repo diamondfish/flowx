@@ -1,0 +1,28 @@
+{
+  "name": "flowx",
+  "version": "1.0.0",
+  "description": "Interactive CLI for cleaning up remote git branches",
+  "type": "module",
+  "bin": {
+    "flowx": "src/flowx.js"
+  },
+  "files": [
+    "src"
+  ],
+  "scripts": {
+    "start": "node src/flowx.js"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/diamondfish/flowx.git"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "author": "Johan Bjarnle",
+  "license": "MIT",
+  "dependencies": {
+    "@inquirer/core": "^11.1.9",
+    "@inquirer/prompts": "^8.4.2"
+  }
+}
