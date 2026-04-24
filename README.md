@@ -43,7 +43,7 @@ Each row in the interactive list shows the branch name, the date of its last com
     [-] main (default)               2025-04-24 (4 minutes ago)  8432     0
     [-] staging (protected)          2025-03-24 (1 month ago)    8455     3
     ▶ Delete 0 selected branches
-  (↑/↓ navigate, space/→ toggle, enter delete)
+  (↑/↓ navigate, SPACE/→ toggle, ENTER delete)
 ```
 
 Disabled rows (`[-]`) cannot be selected and are tagged with the reason:
