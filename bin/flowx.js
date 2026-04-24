@@ -113,9 +113,43 @@ const fetchAndListRemoteBranches = () => {
     .sort((a, b) => a.name.localeCompare(b.name));
 };
 
+const getDefaultRemoteBranch = () => {
+  try {
+    const ref = git(`symbolic-ref --short refs/remotes/${REMOTE}/HEAD`);
+    const prefix = `${REMOTE}/`;
+    if (ref.startsWith(prefix)) return ref.slice(prefix.length);
+  } catch {
+    // not set — fall back to candidate detection
+  }
+  for (const candidate of ["main", "master"]) {
+    try {
+      execSync(`git rev-parse --verify refs/remotes/${REMOTE}/${candidate}`, {
+        stdio: "pipe",
+      });
+      return candidate;
+    } catch {
+      // try next
+    }
+  }
+  return null;
+};
+
 const getCommitCount = (branch) => {
   try {
     return Number(git(`rev-list --count refs/remotes/${REMOTE}/${branch}`));
+  } catch {
+    return null;
+  }
+};
+
+const getCommitsAhead = (branch, base) => {
+  if (!base) return null;
+  try {
+    return Number(
+      git(
+        `rev-list --count refs/remotes/${REMOTE}/${base}..refs/remotes/${REMOTE}/${branch}`,
+      ),
+    );
   } catch {
     return null;
   }
@@ -216,7 +250,8 @@ const branchCheckbox = createPrompt((config, done) => {
     const padded = displayName(item).padEnd(maxDisplayLen);
     const name = item.disabled ? `${C.dim}${padded}${C.reset}` : padded;
     const commits = item.commits == null ? "?" : String(item.commits);
-    const meta = `${C.dim}${item.date}  ${commits.padEnd(7)}${C.reset}`;
+    const ahead = item.ahead == null ? "—" : String(item.ahead);
+    const meta = `${C.dim}${item.date}  ${commits.padEnd(7)}  ${ahead.padEnd(5)}${C.reset}`;
     return `${pointer} ${box} ${name}  ${meta}`;
   };
 
@@ -225,7 +260,7 @@ const branchCheckbox = createPrompt((config, done) => {
     return `${prefix} ${message} ${C.dim}(${count} selected)${C.reset}`;
   }
 
-  const header = `${C.dim}      ${"Branch".padEnd(maxDisplayLen)}  ${"Updated".padEnd(10)}  ${"Commits".padEnd(7)}${C.reset}`;
+  const header = `${C.dim}      ${"Branch".padEnd(maxDisplayLen)}  ${"Updated".padEnd(10)}  ${"Commits".padEnd(7)}  ${"Ahead".padEnd(5)}${C.reset}`;
   const lines = items.map(renderItem).join("\n");
   const help = `${C.dim}  (↑/↓ navigate, space/→ toggle, enter delete)${C.reset}`;
   return [`${prefix} ${message}`, header, lines, help].join("\n");
@@ -290,8 +325,17 @@ const main = async () => {
     process.exit(0);
   }
 
-  process.stdout.write(`${C.cyan}Counting commits...${C.reset}`);
-  for (const b of branches) b.commits = getCommitCount(b.name);
+  const base = getDefaultRemoteBranch();
+  if (base) PROTECTED.add(base);
+
+  const label = base
+    ? `Counting commits (total and ahead of ${base})...`
+    : "Counting commits...";
+  process.stdout.write(`${C.cyan}${label}${C.reset}`);
+  for (const b of branches) {
+    b.commits = getCommitCount(b.name);
+    b.ahead = getCommitsAhead(b.name, base);
+  }
   process.stdout.write(` ${C.green}done${C.reset}\n`);
 
   const deletableCount = branches.filter(
@@ -300,11 +344,12 @@ const main = async () => {
 
   if (deletableCount === 0) {
     const rows = branches.map((b) => {
-      const reason = PROTECTED.has(b.name)
-        ? "protected"
-        : b.name === currentBranch
-          ? "current HEAD"
-          : "protected";
+      const reason =
+        b.name === base
+          ? "default"
+          : b.name === currentBranch
+            ? "current HEAD"
+            : "protected";
       return { ...b, reason, display: `${b.name} (${reason})` };
     });
     const maxDisplayLen = rows.reduce(
@@ -313,13 +358,14 @@ const main = async () => {
     );
     console.log("");
     console.log(
-      `${C.dim}      ${"Branch".padEnd(maxDisplayLen)}  ${"Updated".padEnd(10)}  ${"Commits".padEnd(7)}${C.reset}`,
+      `${C.dim}      ${"Branch".padEnd(maxDisplayLen)}  ${"Updated".padEnd(10)}  ${"Commits".padEnd(7)}  ${"Ahead".padEnd(5)}${C.reset}`,
     );
     for (const r of rows) {
       const padded = r.display.padEnd(maxDisplayLen);
       const commits = r.commits == null ? "?" : String(r.commits);
+      const ahead = r.ahead == null ? "—" : String(r.ahead);
       console.log(
-        `  ${C.dim}[-] ${padded}  ${r.date}  ${commits.padEnd(7)}${C.reset}`,
+        `  ${C.dim}[-] ${padded}  ${r.date}  ${commits.padEnd(7)}  ${ahead.padEnd(5)}${C.reset}`,
       );
     }
     console.log("");
@@ -337,11 +383,14 @@ const main = async () => {
 
   const choices = branches.map((b) => {
     const disabled = isProtected(b.name, currentBranch);
-    const reason = PROTECTED.has(b.name)
-      ? "protected"
-      : b.name === currentBranch
-        ? "current HEAD"
-        : false;
+    const reason =
+      b.name === base
+        ? "default"
+        : b.name === currentBranch
+          ? "current HEAD"
+          : PROTECTED.has(b.name)
+            ? "protected"
+            : false;
     return {
       name: b.name,
       value: b.name,
