@@ -28,20 +28,45 @@ Dry run — shows what would be deleted without touching the remote:
 flowx --dry-run
 ```
 
+### List format
+
+Each row in the interactive list shows the branch name, the date of its last commit, and the total number of commits on it. When a `base` branch is configured, an `Ahead` column is added, showing how many commits that branch has that are not on `base`.
+
+```
+? Select branches to delete from origin:
+
+        Branch                       Updated     Commits  Ahead
+  ❯ [ ] feature/new-thing            2024-11-20  8435     3
+    [ ] feature/stale                2024-05-02  8444     12
+    [-] develop (base)               2025-04-22  8479     0
+    [-] main (protected)             2025-04-24  8432     —
+    [-] feature/mine (current HEAD)  2024-12-01  8440     8
+    ▶ Delete 0 marked branches
+  (↑/↓ navigate, space/→ toggle, enter delete)
+```
+
+Disabled rows (`[-]`) cannot be selected and are tagged with the reason:
+
+- `(default)` — the repo's default branch (from `origin/HEAD`)
+- `(base)` — the configured base branch (see [Configuration](#configuration))
+- `(default/base)` — when the same branch is both the repo default and the configured base
+- `(current HEAD)` — the branch you are currently checked out on
+- `(protected)` — matches an entry in `protected` (see [Configuration](#configuration))
+
 ### Keys
 
-| Key        | Action                                         |
-| ---------- | ---------------------------------------------- |
-| `↑` / `↓`  | Move cursor                                    |
-| `space` / `→` | Toggle selection on the highlighted branch  |
-| `enter`    | Confirm selection and proceed to delete prompt |
-| `ctrl+c`   | Cancel                                         |
+| Key           | Action                                         |
+| ------------- | ---------------------------------------------- |
+| `↑` / `↓`     | Move cursor                                    |
+| `space` / `→` | Toggle selection on the highlighted branch     |
+| `enter`       | Confirm selection and proceed to delete prompt |
+| `ctrl+c`      | Cancel                                         |
 
 ## Configuration
 
-flowx can be configured with a `.flowxrc` file written in JSON with support for `//` line and `/* */` block comments. By default it is read from the current working directory — if it doesn't exist, built-in defaults are used.
+flowx can be configured with a `.flowxrc` file written in JSON with support for `//` line and `/* */` block comments. By default it is read from the current working directory.
 
-The first time you run `flowx` in a git repo without a `.flowxrc`, it prompts you to pick a base branch and writes the config for you (cursor defaults to `develop`/`development` if either exists). Pick `— no base` to skip.
+The first time you run `flowx` in a git repo without a `.flowxrc`, it prompts you to pick a base branch and writes the config for you.
 
 Supported keys:
 
@@ -61,8 +86,8 @@ The config format supports `//` line comments, `/* */` block comments, and trail
   // Count "Ahead" commits relative to develop instead of main
   "base": "develop",
 
-  // Only these are treated as protected
-  "protected": ["main", "develop"]
+  // Treat these as protected. Entries with "*" are matched as globs.
+  "protected": ["main", "develop", "release/*", "hotfix/*"]
 }
 ```
 
@@ -94,8 +119,9 @@ If the target file already exists you will be prompted before it is overwritten.
 
 1. Verifies you are inside a git repository and that the configured remote exists.
 2. Runs `git fetch --prune <remote>`.
-3. Lists remote branches under `refs/remotes/<remote>/` with last-commit date and total commit count.
-4. After confirmation, deletes each selected branch with `git push <remote> --delete <branch>`.
+3. If no `.flowxrc` is found, runs the init prompt to pick a base branch and writes the file.
+4. Lists remote branches under `refs/remotes/<remote>/` with last-commit date, total commit count, and — when `base` is set — commits ahead of `base`.
+5. After confirmation, deletes each selected branch with `git push <remote> --delete <branch>`.
 
 ## Develop
 

@@ -38,8 +38,7 @@ const getFlagValue = (flag) => {
 
 const CONFIG_PATH = getFlagValue("--config") ?? getFlagValue("-c");
 const WRITE_CONFIG_MODE = hasFlag("--write-config") || hasFlag("-w");
-const WRITE_CONFIG_PATH =
-  getFlagValue("--write-config") ?? getFlagValue("-w");
+const WRITE_CONFIG_PATH = getFlagValue("--write-config") ?? getFlagValue("-w");
 const DRY_RUN = process.argv.includes("--dry-run");
 
 const buildProtectedMatcher = (patterns) => {
@@ -140,6 +139,17 @@ const fetchAndListRemoteBranches = () => {
     .sort((a, b) => a.name.localeCompare(b.name));
 };
 
+const getRepoDefaultBranch = () => {
+  try {
+    const ref = git(`symbolic-ref --short refs/remotes/${REMOTE}/HEAD`);
+    const prefix = `${REMOTE}/`;
+    if (ref.startsWith(prefix)) return ref.slice(prefix.length);
+  } catch {
+    // origin/HEAD not set
+  }
+  return null;
+};
+
 const runInit = async (branches) => {
   const names = branches
     .map((b) => b.name)
@@ -149,7 +159,9 @@ const runInit = async (branches) => {
       if (aSlash !== bSlash) return aSlash ? 1 : -1;
       return a.localeCompare(b);
     });
+  const repoDefault = getRepoDefaultBranch();
   const preferred =
+    (repoDefault && names.includes(repoDefault) ? repoDefault : null) ??
     names.find((n) => n === "develop") ??
     names.find((n) => n === "development") ??
     names[0];
@@ -318,7 +330,7 @@ const branchCheckbox = createPrompt((config, done) => {
   const header = `${C.dim}      ${headerCols.join("  ")}${C.reset}`;
   const lines = items.map(renderItem).join("\n");
   const help = `${C.dim}  (↑/↓ navigate, space/→ toggle, enter delete)${C.reset}`;
-  return [`${prefix} ${message}`, header, lines, help].join("\n");
+  return [`${prefix} ${message}`, "", header, lines, help].join("\n");
 });
 
 const deleteBranch = (branch) => {
@@ -393,9 +405,24 @@ const main = async () => {
     if (BASE) PROTECTED.add(BASE);
   }
 
-  const label = BASE
-    ? `Counting commits (total and ahead of ${BASE})...`
-    : "Counting commits...";
+  const repoDefault = getRepoDefaultBranch();
+  if (repoDefault) PROTECTED.add(repoDefault);
+
+  const branchReason = (name) => {
+    const isDefault = name === repoDefault;
+    const isBase = name === BASE;
+    if (isDefault && isBase) return "default/base";
+    if (isDefault) return "default";
+    if (isBase) return "base";
+    if (name === currentBranch) return "current HEAD";
+    if (PROTECTED.has(name)) return "protected";
+    return false;
+  };
+
+  // const label = BASE
+  //   ? `Counting commits (total and ahead of ${BASE})...`
+  //   : "Counting commits...";
+  const label = "Counting commits...";
   process.stdout.write(`${C.cyan}${label}${C.reset}`);
   for (const b of branches) {
     b.commits = getCommitCount(b.name);
@@ -409,12 +436,7 @@ const main = async () => {
 
   if (deletableCount === 0) {
     const rows = branches.map((b) => {
-      const reason =
-        b.name === BASE
-          ? "base"
-          : b.name === currentBranch
-            ? "current HEAD"
-            : "protected";
+      const reason = branchReason(b.name) || "protected";
       return { ...b, reason, display: `${b.name} (${reason})` };
     });
     const maxDisplayLen = rows.reduce(
@@ -454,14 +476,7 @@ const main = async () => {
 
   const choices = branches.map((b) => {
     const disabled = isProtected(b.name, currentBranch);
-    const reason =
-      b.name === BASE
-        ? "base"
-        : b.name === currentBranch
-          ? "current HEAD"
-          : PROTECTED.has(b.name)
-            ? "protected"
-            : false;
+    const reason = branchReason(b.name);
     return {
       name: b.name,
       value: b.name,
