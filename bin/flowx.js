@@ -18,7 +18,7 @@ import {
   loadConfig,
   writeConfigTemplate,
   CONFIG_FILENAME,
-} from "./config.js";
+} from "../src/config.js";
 
 const hasFlag = (flag) =>
   process.argv.some((a) => a === flag || a.startsWith(`${flag}=`));

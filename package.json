@@ -4,13 +4,14 @@
   "description": "Interactive CLI for cleaning up remote git branches",
   "type": "module",
   "bin": {
-    "flowx": "src/flowx.js"
+    "flowx": "bin/flowx.js"
   },
   "files": [
+    "bin",
     "src"
   ],
   "scripts": {
-    "start": "node src/flowx.js"
+    "start": "node bin/flowx.js"
   },
   "repository": {
     "type": "git",
