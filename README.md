@@ -2,7 +2,7 @@
 
 Interactive CLI for cleaning up remote git branches. Fetches branches from the configured remote (default `origin`), lets you pick the ones you want gone with a keyboard-driven checklist, and deletes them after confirmation.
 
-Protected branches (by default `master`, `main`, `develop`, `development`, `prod`, `production`, `staging`) and the branch you are currently on cannot be selected. The remote and the list of protected branches can be customized in a `.flowxrc` config file — see [Configuration](#configuration).
+Protected branches (by default `master`, `main`, `develop`, `development`, `prod`, `production`, `staging`) and the branch you are currently on cannot be selected. The remote and the list of protected branches can be customized in a `.flowx.jsonc` config file — see [Configuration](#configuration).
 
 ## Install
 
@@ -64,9 +64,9 @@ Disabled rows (`[-]`) cannot be selected and are tagged with the reason:
 
 ## Configuration
 
-flowx can be configured with a `.flowxrc` file written in JSON with support for `//` line and `/* */` block comments. By default it is read from the current working directory.
+flowx can be configured with a `.flowx.jsonc` file written in JSON with support for `//` line and `/* */` block comments. The `.jsonc` extension lets VS Code and JetBrains IDEs highlight the file as JSON-with-comments out of the box. By default the config is read from the current working directory.
 
-The first time you run `flowx` in a git repo without a `.flowxrc`, it prompts you to pick a base branch and writes the config for you.
+The first time you run `flowx` in a git repo without a `.flowx.jsonc`, it prompts you to pick a base branch and writes the config for you.
 
 Supported keys:
 
@@ -76,7 +76,7 @@ Supported keys:
 
 The config format supports `//` line comments, `/* */` block comments, and trailing commas.
 
-### Example `.flowxrc`
+### Example `.flowx.jsonc`
 
 ```jsonc
 {
@@ -96,21 +96,21 @@ The config format supports `//` line comments, `/* */` block comments, and trail
 Point flowx at a config file somewhere else with `--config <path>` (short form `-c <path>`). Accepts both space- and `=`-separated forms:
 
 ```bash
-flowx --config ./configs/work.flowxrc
-flowx -c ~/.config/flowx.json
-flowx --config=.flowxrc.prod
+flowx --config ./configs/work.flowx.jsonc
+flowx -c ~/.config/flowx.jsonc
+flowx --config=.flowx.prod.jsonc
 ```
 
 If the specified file does not exist, flowx exits with an error.
 
 ### Generate a starter config
 
-Create a `.flowxrc` with the defaults using `--write-config` (short form `-w`). With no path argument it writes `.flowxrc` in the current directory. Pass a path to write elsewhere:
+Create a `.flowx.jsonc` with the defaults using `--write-config` (short form `-w`). With no path argument it writes `.flowx.jsonc` in the current directory. Pass a path to write elsewhere:
 
 ```bash
 flowx --write-config
-flowx --write-config ./team.flowxrc
-flowx -w ~/.config/flowx.json
+flowx --write-config ./team.flowx.jsonc
+flowx -w ~/.config/flowx.jsonc
 ```
 
 If the target file already exists you will be prompted before it is overwritten.
@@ -119,7 +119,7 @@ If the target file already exists you will be prompted before it is overwritten.
 
 1. Verifies you are inside a git repository and that the configured remote exists.
 2. Runs `git fetch --prune <remote>`.
-3. If no `.flowxrc` is found, runs the init prompt to pick a base branch and writes the file.
+3. If no `.flowx.jsonc` is found, runs the init prompt to pick a base branch and writes the file.
 4. Lists remote branches under `refs/remotes/<remote>/` with last-commit date, total commit count, and — when `base` is set — commits ahead of `base`.
 5. After confirmation, deletes each selected branch with `git push <remote> --delete <branch>`.
 

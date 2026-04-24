@@ -1,7 +1,7 @@
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
-export const CONFIG_FILENAME = ".flowxrc";
+export const CONFIG_FILENAME = ".flowx.jsonc";
 
 const DEFAULTS = {
   remote: "origin",

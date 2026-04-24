@@ -1,17 +1,5 @@
 #!/usr/bin/env node
-import { execSync } from "node:child_process";
 import { confirm, select } from "@inquirer/prompts";
-import {
-  createPrompt,
-  useState,
-  useKeypress,
-  usePrefix,
-  isEnterKey,
-  isSpaceKey,
-  isUpKey,
-  isDownKey,
-  makeTheme,
-} from "@inquirer/core";
 import { existsSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 import {
@@ -21,6 +9,15 @@ import {
   configExists,
   CONFIG_FILENAME,
 } from "../src/config.js";
+import { C } from "../src/colors.js";
+import { buildProtectedMatcher } from "../src/protected.js";
+import {
+  isInsideGitRepo,
+  hasRemote,
+  getCurrentBranch,
+  createRemoteClient,
+} from "../src/git.js";
+import { branchCheckbox } from "../src/prompts.js";
 
 const hasFlag = (flag) =>
   process.argv.some((a) => a === flag || a.startsWith(`${flag}=`));
@@ -41,26 +38,6 @@ const WRITE_CONFIG_MODE = hasFlag("--write-config") || hasFlag("-w");
 const WRITE_CONFIG_PATH = getFlagValue("--write-config") ?? getFlagValue("-w");
 const DRY_RUN = process.argv.includes("--dry-run");
 
-const buildProtectedMatcher = (patterns) => {
-  const exact = new Set();
-  const regexes = [];
-  for (const p of patterns) {
-    if (typeof p !== "string" || !p) continue;
-    if (p.includes("*")) {
-      const escape = (s) => s.replace(/[.+?^${}()|[\]\\]/g, "\\$&");
-      const source = "^" + p.split("*").map(escape).join(".*") + "$";
-      regexes.push(new RegExp(source));
-    } else {
-      exact.add(p);
-    }
-  }
-  return {
-    has: (name) => exact.has(name) || regexes.some((re) => re.test(name)),
-    add: (name) => exact.add(name),
-    delete: (name) => exact.delete(name),
-  };
-};
-
 let REMOTE = "origin";
 let PROTECTED = buildProtectedMatcher([]);
 let BASE = null;
@@ -72,83 +49,17 @@ if (!WRITE_CONFIG_MODE) {
     PROTECTED = buildProtectedMatcher(config.protected);
     BASE = config.base;
   } catch (err) {
-    console.error(`\x1b[31m${err.message}\x1b[0m`);
+    console.error(`${C.red}${err.message}${C.reset}`);
     process.exit(1);
   }
   CONFIG_EXISTS = configExists(CONFIG_PATH);
   if (BASE) PROTECTED.add(BASE);
 }
 
-const C = {
-  reset: "\x1b[0m",
-  dim: "\x1b[90m",
-  red: "\x1b[31m",
-  green: "\x1b[32m",
-  yellow: "\x1b[33m",
-  cyan: "\x1b[36m",
-  bold: "\x1b[1m",
-};
+const remote = createRemoteClient(REMOTE);
 
-const git = (args) => execSync(`git ${args}`, { encoding: "utf8" }).trim();
-
-const isInsideGitRepo = () => {
-  try {
-    execSync("git rev-parse --is-inside-work-tree", { stdio: "pipe" });
-    return true;
-  } catch {
-    return false;
-  }
-};
-
-const hasRemote = (name) => {
-  try {
-    execSync(`git remote get-url ${name}`, { stdio: "pipe" });
-    return true;
-  } catch {
-    return false;
-  }
-};
-
-const getCurrentBranch = () => {
-  try {
-    return git("rev-parse --abbrev-ref HEAD");
-  } catch {
-    return null;
-  }
-};
-
-const fetchAndListRemoteBranches = () => {
-  process.stdout.write(`${C.cyan}Fetching from ${REMOTE}...${C.reset}`);
-  execSync(`git fetch --prune ${REMOTE}`, { stdio: "pipe" });
-  process.stdout.write(` ${C.green}done${C.reset}\n`);
-  const raw = git(
-    `for-each-ref --format=%(refname)%09%(committerdate:short) refs/remotes/${REMOTE}`,
-  );
-  const prefix = `refs/remotes/${REMOTE}/`;
-  return raw
-    .split(/\r?\n/)
-    .map((s) => s.trim())
-    .filter(Boolean)
-    .map((line) => {
-      const [refname, date] = line.split("\t");
-      return { refname, date };
-    })
-    .filter((r) => r.refname.startsWith(prefix))
-    .map((r) => ({ name: r.refname.slice(prefix.length), date: r.date }))
-    .filter((b) => b.name !== "HEAD")
-    .sort((a, b) => a.name.localeCompare(b.name));
-};
-
-const getRepoDefaultBranch = () => {
-  try {
-    const ref = git(`symbolic-ref --short refs/remotes/${REMOTE}/HEAD`);
-    const prefix = `${REMOTE}/`;
-    if (ref.startsWith(prefix)) return ref.slice(prefix.length);
-  } catch {
-    // origin/HEAD not set
-  }
-  return null;
-};
+const isProtected = (branch, currentBranch) =>
+  PROTECTED.has(branch) || branch === currentBranch;
 
 const runInit = async (branches) => {
   const names = branches
@@ -159,7 +70,7 @@ const runInit = async (branches) => {
       if (aSlash !== bSlash) return aSlash ? 1 : -1;
       return a.localeCompare(b);
     });
-  const repoDefault = getRepoDefaultBranch();
+  const repoDefault = remote.getDefaultBranch();
   const preferred =
     (repoDefault && names.includes(repoDefault) ? repoDefault : null) ??
     names.find((n) => n === "develop") ??
@@ -191,163 +102,6 @@ const runInit = async (branches) => {
   return picked;
 };
 
-const getCommitCount = (branch) => {
-  try {
-    return Number(git(`rev-list --count refs/remotes/${REMOTE}/${branch}`));
-  } catch {
-    return null;
-  }
-};
-
-const getCommitsAhead = (branch, base) => {
-  if (!base) return null;
-  try {
-    return Number(
-      git(
-        `rev-list --count refs/remotes/${REMOTE}/${base}..refs/remotes/${REMOTE}/${branch}`,
-      ),
-    );
-  } catch {
-    return null;
-  }
-};
-
-const isProtected = (branch, currentBranch) =>
-  PROTECTED.has(branch) || branch === currentBranch;
-
-const DELETE_ROW = Symbol("delete-row");
-const isRightKey = (key) => key && key.name === "right";
-
-const displayName = (item) => {
-  if (!item.disabled) return item.name;
-  const reason =
-    typeof item.disabled === "string" ? item.disabled : "protected";
-  return `${item.name} (${reason})`;
-};
-
-const branchCheckbox = createPrompt((config, done) => {
-  const { message, choices } = config;
-  const theme = makeTheme();
-  const prefix = usePrefix({ theme });
-
-  const items = [...choices, DELETE_ROW];
-  const maxDisplayLen = choices.reduce(
-    (m, c) => Math.max(m, displayName(c).length),
-    0,
-  );
-  const firstSelectable = choices.findIndex((c) => !c.disabled);
-  const initialCursor =
-    firstSelectable >= 0 ? firstSelectable : items.length - 1;
-
-  const [cursor, setCursor] = useState(initialCursor);
-  const [selected, setSelected] = useState(new Set());
-  const [submitted, setSubmitted] = useState(false);
-
-  const submit = () => {
-    const chosen = choices
-      .filter((c) => selected.has(c.value))
-      .map((c) => c.value);
-    setSubmitted(true);
-    done(chosen);
-  };
-
-  useKeypress((key) => {
-    if (submitted) return;
-
-    if (isEnterKey(key)) {
-      submit();
-      return;
-    }
-
-    if (isUpKey(key) || isDownKey(key)) {
-      const dir = isUpKey(key) ? -1 : 1;
-      let next = cursor;
-      for (let i = 0; i < items.length; i += 1) {
-        next = (next + dir + items.length) % items.length;
-        const it = items[next];
-        if (it === DELETE_ROW) break;
-        if (!it.disabled) break;
-      }
-      setCursor(next);
-      return;
-    }
-
-    if (isSpaceKey(key) || isRightKey(key)) {
-      const current = items[cursor];
-      if (current === DELETE_ROW) {
-        submit();
-        return;
-      }
-      if (current.disabled) return;
-      const next = new Set(selected);
-      if (next.has(current.value)) next.delete(current.value);
-      else next.add(current.value);
-      setSelected(next);
-    }
-  });
-
-  const renderItem = (item, idx) => {
-    const isCursor = idx === cursor;
-    const pointer = isCursor ? `${C.cyan}❯${C.reset}` : " ";
-
-    if (item === DELETE_ROW) {
-      const count = selected.size;
-      const label = `Delete ${count} marked branch${count === 1 ? "" : "es"}`;
-      const color = count > 0 ? C.red : C.dim;
-      const bold = isCursor ? C.bold : "";
-      return `${pointer} ${bold}${color}▶ ${label}${C.reset}`;
-    }
-
-    const isSelected = selected.has(item.value);
-    const box = item.disabled
-      ? `${C.dim}[-]${C.reset}`
-      : isSelected
-        ? `${C.green}[x]${C.reset}`
-        : "[ ]";
-    const padded = displayName(item).padEnd(maxDisplayLen);
-    const name = item.disabled ? `${C.dim}${padded}${C.reset}` : padded;
-    const commits = item.commits == null ? "?" : String(item.commits);
-    const metaParts = [item.date, commits.padEnd(7)];
-    if (BASE) {
-      const ahead = item.ahead == null ? "—" : String(item.ahead);
-      metaParts.push(ahead.padEnd(5));
-    }
-    const meta = `${C.dim}${metaParts.join("  ")}${C.reset}`;
-    return `${pointer} ${box} ${name}  ${meta}`;
-  };
-
-  if (submitted) {
-    const count = selected.size;
-    return `${prefix} ${message} ${C.dim}(${count} selected)${C.reset}`;
-  }
-
-  const headerCols = [
-    "Branch".padEnd(maxDisplayLen),
-    "Updated".padEnd(10),
-    "Commits".padEnd(7),
-  ];
-  if (BASE) headerCols.push("Ahead".padEnd(5));
-  const header = `${C.dim}      ${headerCols.join("  ")}${C.reset}`;
-  const lines = items.map(renderItem).join("\n");
-  const help = `${C.dim}  (↑/↓ navigate, space/→ toggle, enter delete)${C.reset}`;
-  return [`${prefix} ${message}`, "", header, lines, help].join("\n");
-});
-
-const deleteBranch = (branch) => {
-  if (DRY_RUN) {
-    console.log(
-      `${C.yellow}[dry-run]${C.reset} would delete ${C.bold}${branch}${C.reset}`,
-    );
-    return { ok: true };
-  }
-  try {
-    execSync(`git push ${REMOTE} --delete ${branch}`, { stdio: "pipe" });
-    return { ok: true };
-  } catch (err) {
-    return { ok: false, error: err.stderr?.toString() || err.message };
-  }
-};
-
 const runWriteConfig = async (targetPath) => {
   const path = resolve(targetPath ?? CONFIG_FILENAME);
   if (existsSync(path)) {
@@ -362,6 +116,16 @@ const runWriteConfig = async (targetPath) => {
   }
   writeConfigTemplate(path);
   console.log(`${C.green}Wrote${C.reset} ${path}`);
+};
+
+const deleteBranchWithDryRun = (branch) => {
+  if (DRY_RUN) {
+    console.log(
+      `${C.yellow}[dry-run]${C.reset} would delete ${C.bold}${branch}${C.reset}`,
+    );
+    return { ok: true };
+  }
+  return remote.deleteBranch(branch);
 };
 
 const main = async () => {
@@ -385,7 +149,11 @@ const main = async () => {
   }
 
   const currentBranch = getCurrentBranch();
-  const branches = fetchAndListRemoteBranches();
+
+  process.stdout.write(`${C.cyan}Fetching from ${REMOTE}...${C.reset}`);
+  remote.fetchPrune();
+  process.stdout.write(` ${C.green}done${C.reset}\n`);
+  const branches = remote.listBranches();
 
   if (branches.length === 0) {
     console.log(`${C.yellow}No remote branches found on ${REMOTE}.${C.reset}`);
@@ -405,7 +173,7 @@ const main = async () => {
     if (BASE) PROTECTED.add(BASE);
   }
 
-  const repoDefault = getRepoDefaultBranch();
+  const repoDefault = remote.getDefaultBranch();
   if (repoDefault) PROTECTED.add(repoDefault);
 
   const branchReason = (name) => {
@@ -419,14 +187,10 @@ const main = async () => {
     return false;
   };
 
-  // const label = BASE
-  //   ? `Counting commits (total and ahead of ${BASE})...`
-  //   : "Counting commits...";
-  const label = "Counting commits...";
-  process.stdout.write(`${C.cyan}${label}${C.reset}`);
+  process.stdout.write(`${C.cyan}Counting commits...${C.reset}`);
   for (const b of branches) {
-    b.commits = getCommitCount(b.name);
-    if (BASE) b.ahead = getCommitsAhead(b.name, BASE);
+    b.commits = remote.getCommitCount(b.name);
+    if (BASE) b.ahead = remote.getCommitsAhead(b.name, BASE);
   }
   process.stdout.write(` ${C.green}done${C.reset}\n`);
 
@@ -439,13 +203,19 @@ const main = async () => {
       const reason = branchReason(b.name) || "protected";
       return { ...b, reason, display: `${b.name} (${reason})` };
     });
+    const updatedCol = (r) =>
+      r.relative ? `${r.date} (${r.relative})` : r.date;
     const maxDisplayLen = rows.reduce(
       (m, r) => Math.max(m, r.display.length),
       0,
     );
+    const maxUpdatedLen = rows.reduce(
+      (m, r) => Math.max(m, updatedCol(r).length),
+      "Updated".length,
+    );
     const headerCols = [
       "Branch".padEnd(maxDisplayLen),
-      "Updated".padEnd(10),
+      "Updated".padEnd(maxUpdatedLen),
       "Commits".padEnd(7),
     ];
     if (BASE) headerCols.push("Ahead".padEnd(5));
@@ -454,7 +224,11 @@ const main = async () => {
     for (const r of rows) {
       const padded = r.display.padEnd(maxDisplayLen);
       const commits = r.commits == null ? "?" : String(r.commits);
-      const parts = [padded, r.date, commits.padEnd(7)];
+      const parts = [
+        padded,
+        updatedCol(r).padEnd(maxUpdatedLen),
+        commits.padEnd(7),
+      ];
       if (BASE) {
         const ahead = r.ahead == null ? "—" : String(r.ahead);
         parts.push(ahead.padEnd(5));
@@ -481,6 +255,7 @@ const main = async () => {
       name: b.name,
       value: b.name,
       date: b.date,
+      relative: b.relative,
       commits: b.commits,
       ahead: b.ahead,
       disabled: disabled ? reason : false,
@@ -488,8 +263,9 @@ const main = async () => {
   });
 
   const selected = await branchCheckbox({
-    message: `Select branches to delete from ${REMOTE}:`,
+    message: `Select branches to delete from ${REMOTE}`,
     choices,
+    showAhead: BASE !== null,
   });
 
   if (selected.length === 0) {
@@ -515,7 +291,7 @@ const main = async () => {
   const results = [];
   for (const branch of selected) {
     process.stdout.write(`Deleting ${branch}... `);
-    const result = deleteBranch(branch);
+    const result = deleteBranchWithDryRun(branch);
     if (result.ok) {
       console.log(`${C.green}✔${C.reset}`);
     } else {
