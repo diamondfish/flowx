@@ -92,8 +92,9 @@ const getCurrentBranch = () => {
 };
 
 const fetchAndListRemoteBranches = () => {
-  console.log(`${C.cyan}Fetching from ${REMOTE}...${C.reset}`);
-  execSync(`git fetch --prune ${REMOTE}`, { stdio: "inherit" });
+  process.stdout.write(`${C.cyan}Fetching from ${REMOTE}...${C.reset}`);
+  execSync(`git fetch --prune ${REMOTE}`, { stdio: "pipe" });
+  process.stdout.write(` ${C.green}done${C.reset}\n`);
   const raw = git(
     `for-each-ref --format=%(refname)%09%(committerdate:short) refs/remotes/${REMOTE}`,
   );
@@ -126,13 +127,23 @@ const isProtected = (branch, currentBranch) =>
 const DELETE_ROW = Symbol("delete-row");
 const isRightKey = (key) => key && key.name === "right";
 
+const displayName = (item) => {
+  if (!item.disabled) return item.name;
+  const reason =
+    typeof item.disabled === "string" ? item.disabled : "protected";
+  return `${item.name} (${reason})`;
+};
+
 const branchCheckbox = createPrompt((config, done) => {
   const { message, choices } = config;
   const theme = makeTheme();
   const prefix = usePrefix({ theme });
 
   const items = [...choices, DELETE_ROW];
-  const maxNameLen = choices.reduce((m, c) => Math.max(m, c.name.length), 0);
+  const maxDisplayLen = choices.reduce(
+    (m, c) => Math.max(m, displayName(c).length),
+    0,
+  );
   const firstSelectable = choices.findIndex((c) => !c.disabled);
   const initialCursor =
     firstSelectable >= 0 ? firstSelectable : items.length - 1;
@@ -202,14 +213,11 @@ const branchCheckbox = createPrompt((config, done) => {
       : isSelected
         ? `${C.green}[x]${C.reset}`
         : "[ ]";
-    const padded = item.name.padEnd(maxNameLen);
+    const padded = displayName(item).padEnd(maxDisplayLen);
     const name = item.disabled ? `${C.dim}${padded}${C.reset}` : padded;
     const commits = item.commits == null ? "?" : String(item.commits);
-    const meta = `${C.dim}${item.date}  ${commits.padStart(5)} commits${C.reset}`;
-    const tag = item.disabled
-      ? ` ${C.dim}(${typeof item.disabled === "string" ? item.disabled : "protected"})${C.reset}`
-      : "";
-    return `${pointer} ${box} ${name}  ${meta}${tag}`;
+    const meta = `${C.dim}${item.date}  ${commits.padEnd(7)}${C.reset}`;
+    return `${pointer} ${box} ${name}  ${meta}`;
   };
 
   if (submitted) {
@@ -217,9 +225,10 @@ const branchCheckbox = createPrompt((config, done) => {
     return `${prefix} ${message} ${C.dim}(${count} selected)${C.reset}`;
   }
 
+  const header = `${C.dim}      ${"Branch".padEnd(maxDisplayLen)}  ${"Updated".padEnd(10)}  ${"Commits".padEnd(7)}${C.reset}`;
   const lines = items.map(renderItem).join("\n");
   const help = `${C.dim}  (↑/↓ navigate, space/→ toggle, enter delete)${C.reset}`;
-  return [`${prefix} ${message}`, lines, help].join("\n");
+  return [`${prefix} ${message}`, header, lines, help].join("\n");
 });
 
 const deleteBranch = (branch) => {
@@ -290,18 +299,27 @@ const main = async () => {
   ).length;
 
   if (deletableCount === 0) {
-    const maxNameLen = branches.reduce((m, b) => Math.max(m, b.name.length), 0);
-    console.log("");
-    for (const b of branches) {
-      const padded = b.name.padEnd(maxNameLen);
-      const commits = b.commits == null ? "?" : String(b.commits);
+    const rows = branches.map((b) => {
       const reason = PROTECTED.has(b.name)
         ? "protected"
         : b.name === currentBranch
           ? "current HEAD"
           : "protected";
+      return { ...b, reason, display: `${b.name} (${reason})` };
+    });
+    const maxDisplayLen = rows.reduce(
+      (m, r) => Math.max(m, r.display.length),
+      0,
+    );
+    console.log("");
+    console.log(
+      `${C.dim}      ${"Branch".padEnd(maxDisplayLen)}  ${"Updated".padEnd(10)}  ${"Commits".padEnd(7)}${C.reset}`,
+    );
+    for (const r of rows) {
+      const padded = r.display.padEnd(maxDisplayLen);
+      const commits = r.commits == null ? "?" : String(r.commits);
       console.log(
-        `  ${C.dim}[-] ${padded}  ${b.date}  ${commits.padStart(5)} commits  (${reason})${C.reset}`,
+        `  ${C.dim}[-] ${padded}  ${r.date}  ${commits.padEnd(7)}${C.reset}`,
       );
     }
     console.log("");

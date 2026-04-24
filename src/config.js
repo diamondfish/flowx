@@ -20,7 +20,7 @@ export const CONFIG_TEMPLATE = `{
   // Remote to operate on
   "remote": "${DEFAULTS.remote}",
 
-  /* Branches that cannot be deleted — replaces the built-in default list */
+  // Branches that cannot be deleted — replaces the built-in default list
   "protected": [
 ${DEFAULTS.protected.map((b) => `    "${b}"`).join(",\n")}
   ]
